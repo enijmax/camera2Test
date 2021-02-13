@@ -23,6 +23,7 @@ import android.hardware.camera2.params.StreamConfigurationMap;
 import android.media.MediaRecorder;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.Log;
@@ -67,10 +68,11 @@ public class MainActivity extends Activity implements View.OnClickListener {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        mMainHandler = new Handler(getMainLooper());
         startBackgroundThread();
-        mPermissionGranted = hasAllPermissions(this, PERMISSIONS);
-        mTextureView = (AutoFitTextureView) this.findViewById(R.id.texture);
-        mButtonVideo = (Button)this.findViewById(R.id.video);
+        mPermissionGranted = hasAllPermissions(this, PERMISSIONS);  // get necessary permission
+        mTextureView = (AutoFitTextureView) this.findViewById(R.id.texture);    //for preview
+        mButtonVideo = (Button)this.findViewById(R.id.video);   // create button for rec
         mButtonVideo.setOnClickListener(this);  //registered button
     }
 
@@ -82,6 +84,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
 
     @Override
     public void onStop() {
+        Log.i(TAG, "onStop");
         super.onStop();
         closeCameraIfPossible();
     }
@@ -197,6 +200,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
      * A {@link Handler} for running tasks in the background.
      */
     private Handler mBackgroundHandler;
+    private Handler mMainHandler;
     /**
      * A {@link Semaphore} to prevent the app from exiting before closing the camera.
      */
@@ -331,9 +335,8 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 mTextureView.setAspectRatio(mPreviewSize.getHeight(), mPreviewSize.getWidth());
             }
             configureTransform(width, height);
-//            mMediaRecorder = new MediaRecorder();
             if (mPermissionGranted) {
-                manager.openCamera(cameraId, mStateCallback, null);
+                manager.openCamera(cameraId, mStateCallback, mMainHandler);
                 mCameraOpened = true;
             } else {
                 Toast.makeText(this, "No Camera permission", LENGTH_LONG).show();
@@ -389,6 +392,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 @Override
                 public void onConfigured(CameraCaptureSession cameraCaptureSession) {
                     mPreviewSession = cameraCaptureSession;
+                    // show preview
                     updatePreview();
                 }
                 @Override
@@ -407,17 +411,26 @@ public class MainActivity extends Activity implements View.OnClickListener {
      */
     private void updatePreview() {
         if (null == mCameraDevice) {
+            Log.e(TAG, "No cameraDevice existed");
             return;
         }
         try {
             setUpCaptureRequestBuilder(mPreviewBuilder);
             HandlerThread thread = new HandlerThread("CameraPreview");
             thread.start();
-            mPreviewSession.setRepeatingRequest(mPreviewBuilder.build(), null, mBackgroundHandler);
+            if (mPreviewBuilder == null)
+                Log.e(TAG, "mPreviewBuilder is null");
+            else {
+                mPreviewSession.setRepeatingRequest(mPreviewBuilder.build(), null, null);
+            }
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
     }
+
+    /*
+     * setup all request for camera, ex flush light or auto focus
+     */
     private void setUpCaptureRequestBuilder(CaptureRequest.Builder builder) {
         builder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
     }
@@ -458,7 +471,6 @@ public class MainActivity extends Activity implements View.OnClickListener {
         mMediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
         mMediaRecorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
         mMediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
-        mMediaRecorder.setOutputFile(getVideoFile(this).getAbsolutePath());
         mMediaRecorder.setVideoEncodingBitRate(10000000);
         mMediaRecorder.setVideoFrameRate(30);
         mMediaRecorder.setVideoSize(mVideoSize.getWidth(), mVideoSize.getHeight());
@@ -469,8 +481,14 @@ public class MainActivity extends Activity implements View.OnClickListener {
         mMediaRecorder.setOrientationHint(orientation);
         mMediaRecorder.prepare();
     }
+
+    /*
+     * Need to create a unique filename
+     */
     private File getVideoFile(Context context) {
-        return new File(context.getExternalFilesDir(null), "video.mp4");
+        Long tsLong = System.currentTimeMillis();
+        String ts_filename = tsLong.toString() + ".mp4";
+        return new File(context.getExternalFilesDir(Environment.DIRECTORY_MOVIES), ts_filename);
     }
 
     /*
@@ -479,12 +497,16 @@ public class MainActivity extends Activity implements View.OnClickListener {
     private void startRecordingVideo() {
         try {
             // UI
+            if (mMediaRecorder == null) {
+                Toast.makeText(this, "MediaRecorder is not ready", LENGTH_LONG);
+                return;
+            }
+            // Start recording
+            Log.i(TAG, "file: "+ getVideoFile(this).getAbsolutePath());
+            mMediaRecorder.setOutputFile(getVideoFile(this).getAbsolutePath()); //to avoid create zero size video file
+            mMediaRecorder.start();
             mButtonVideo.setText(R.string.stop);
             mIsRecordingVideo = true;
-            if (mMediaRecorder == null)
-                mMediaRecorder = new MediaRecorder();
-            // Start recording
-            mMediaRecorder.start();
         } catch (IllegalStateException e) {
             e.printStackTrace();
         }
@@ -498,10 +520,8 @@ public class MainActivity extends Activity implements View.OnClickListener {
             mMediaRecorder.reset();
             Toast.makeText(this, "Video saved: " + getVideoFile(this),
                     LENGTH_SHORT).show();
-            mMediaRecorder = null;
             mIsRecordingVideo = false;
         }
-        startPreview();
     }
 
     @Override
@@ -509,8 +529,10 @@ public class MainActivity extends Activity implements View.OnClickListener {
         Log.i(TAG, "start recording");
         if (mIsRecordingVideo == false)
             startRecordingVideo();
-        else
+        else {
             stopRecordingVideo();
+            startPreview();
+        }
     }
 
     /**
