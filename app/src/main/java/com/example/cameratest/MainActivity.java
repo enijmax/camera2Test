@@ -89,6 +89,22 @@ public class MainActivity extends Activity implements View.OnClickListener {
         closeCameraIfPossible();
     }
 
+    @Override
+    public void onResume() {
+        Log.i(TAG, "onResume");
+        super.onResume();
+        startBackgroundThread();
+        setupCameraIfPossible();
+    }
+
+    @Override
+    public void onPause() {
+        Log.i(TAG, "OnPause");
+        super.onPause();
+        closeCameraIfPossible();
+        stopBackgroundThread();
+    }
+
     private static final SparseIntArray ORIENTATIONS = new SparseIntArray();
     private static final String TAG = "Camera2VideoFragment";
 
@@ -122,7 +138,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
 
     private void setupCameraIfPossible(){
         Log.i(TAG, "mPermissionGranted:" + mPermissionGranted);
-        if (!mCameraOpened && mSurfaceTextureAvailable && mPermissionGranted){
+        if (!mCameraOpened && mSurfaceTextureAvailable && mPermissionGranted && mTextureView.isAvailable()){
             /*
              * Camera not opened, but preview surface ready and permission granted
              */
@@ -130,7 +146,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
             if (mMediaRecorder == null)
                 mMediaRecorder = new MediaRecorder();
             openCamera(mTextureView.getWidth(), mTextureView.getHeight());
-        } else if (mTextureView != null){
+        } else {
             /*
              *
              */
@@ -463,23 +479,31 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }
         mTextureView.setTransform(matrix);
     }
+
+    private boolean mMediaRecReady = false;
+
     private void setUpMediaRecorder() throws IOException {
         if (mMediaRecorder == null) {
-            Log.i(TAG, "setUpMediaRecorder failed");
+            Log.i(TAG, "MediaRecorder isn't ready");
             mMediaRecorder = new MediaRecorder();
         }
-        mMediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
-        mMediaRecorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
-        mMediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
-        mMediaRecorder.setVideoEncodingBitRate(10000000);
-        mMediaRecorder.setVideoFrameRate(30);
-        mMediaRecorder.setVideoSize(mVideoSize.getWidth(), mVideoSize.getHeight());
-        mMediaRecorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264);
-        mMediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
-        int rotation = getWindowManager().getDefaultDisplay().getRotation();
-        int orientation = ORIENTATIONS.get(rotation);
-        mMediaRecorder.setOrientationHint(orientation);
-        mMediaRecorder.prepare();
+        if (!mMediaRecReady) {
+            mMediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+            mMediaRecorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
+            mMediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+            mMediaRecorder.setVideoEncodingBitRate(10000000);
+            mMediaRecorder.setVideoFrameRate(30);
+            mMediaRecorder.setVideoSize(mVideoSize.getWidth(), mVideoSize.getHeight());
+            mMediaRecorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264);
+            mMediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+            mMediaRecorder.setOutputFile(getVideoFile(this).getAbsolutePath());
+            //mMediaRecorder.setMaxFileSize(1024*1024*100); // in bytes or 100MB
+            int rotation = getWindowManager().getDefaultDisplay().getRotation();
+            int orientation = ORIENTATIONS.get(rotation);
+            mMediaRecorder.setOrientationHint(orientation);
+            mMediaRecorder.prepare();
+            mMediaRecReady = true;
+        }
     }
 
     /*
@@ -502,7 +526,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 return;
             }
             // Start recording
-            Log.i(TAG, "file: "+ getVideoFile(this).getAbsolutePath());
+            //Log.i(TAG, "file: "+ getVideoFile(this).getAbsolutePath());
             mMediaRecorder.setOutputFile(getVideoFile(this).getAbsolutePath()); //to avoid create zero size video file
             mMediaRecorder.start();
             mButtonVideo.setText(R.string.stop);
